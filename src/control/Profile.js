@@ -35,7 +35,6 @@ import ol_ext_element from '../util/element'
  * @param {Object=} options
  *  @param {string} options.className
  *	@param {String} options.title button title
- *  @param {ol.style.Style} [options.style] style to draw the profil, default darkblue
  *  @param {ol.style.Style} [options.selectStyle] style for selection, default darkblue fill
  *  @param {*} options.info keys/values for i19n
  *  @param {number} options.width
@@ -45,6 +44,11 @@ import ol_ext_element from '../util/element'
  *  @param {boolean} options.zoomable can zoom in the profil
  */
 var ol_control_Profil = function(options) {
+  this._geometry = {};
+  // Arrays of data
+  this.tab_ = {};
+  this._z = {};
+  this._style = {};
   options = options || {};
   this.info = options.info || ol_control_Profil.prototype.info;
   var self = this;
@@ -67,21 +71,7 @@ var ol_control_Profil = function(options) {
     this.button.addEventListener("touchstart", click_touchstart_function);
     element.appendChild(this.button);
   }
-
-  // Drawing style
-  if (options.style instanceof ol_style_Style) {
-    this._style = options.style;
-  } else {
-    this._style = new ol_style_Style({
-      text: new ol_style_Text(),
-      stroke: new ol_style_Stroke({
-        width: 1.5,
-        color: '#369'
-      })
-    });
-  }
-  if (!this._style.getText()) this._style.setText(new ol_style_Text());
-
+  
   // Selection style
   if (options.selectStyle instanceof ol_style_Style) {
     this._selectStyle = options.selectStyle;
@@ -188,8 +178,7 @@ var ol_control_Profil = function(options) {
   div_time2.innerHTML = (this.info.time||"Time")+': <span class="time">';
   secondTr.appendChild(div_time2);
 
-  // Array of data
-  this.tab_ = [];
+
 
   // Show feature
   if (options.feature) {
@@ -199,35 +188,39 @@ var ol_control_Profil = function(options) {
   // Zoom on profile
   if (options.zoomable) {
     this.set('selectable', true);
-    var start, geom;
+    var start, geom = {};
     this.on('change:geometry', function() {
-      geom = null;
+        for (var geomId in this._geometry) {
+          geom[geomId] = null;
+        }
     });
     this.on('dragstart', function(e) {
       start = e.index;
     })
     this.on('dragend', function(e) {
-      if (Math.abs(start - e.index) > 10) {
-        if (!geom) {
-          var bt = ol_ext_element.create('BUTTON', {
-            parent: element,
-            className: 'ol-zoom-out',
-            click: function(e) {
-              e.stopPropagation();
-              e.preventDefault();
-              if (geom) {
-                this.dispatchEvent({ type:'zoom' });
-                this.setGeometry(geom, this._geometry[1]);
-              }
-              element.removeChild(bt);
-            }.bind(this)
-          })
-        }
-        var saved = geom || this._geometry[0];
-        var g = new ol_geom_LineString(this.getSelection(start, e.index));
-        this.setGeometry(g, this._geometry[1]);
-        geom = saved;
-        this.dispatchEvent({ type:'zoom', geometry: g, start: start, end: e.index });
+      for (var geomId in this._geometry) {
+          if (Math.abs(start - e.index) > 10) {
+            if (!geom[geomId]) {
+              var bt = ol_ext_element.create('BUTTON', {
+                parent: element,
+                className: 'ol-zoom-out',
+                click: function(e) {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (geom[geomId]) {
+                    this.dispatchEvent({ type:'zoom' });
+                    this.setGeometry(geom[geomId], this._geometry[geomId][1], geomId);
+                  }
+                  element.removeChild(bt);
+                }.bind(this)
+              })
+            }
+            var saved = geom[geomId] || this._geometry[geomId][0];
+            var g = new ol_geom_LineString(this.getSelection(start, e.index, geomId));
+            this.setGeometry(g, this._geometry[geomId][1], geomId);
+            geom[geomId] = saved;
+            this.dispatchEvent({ type:'zoom', geometry: g, start: start, end: e.index });
+          }
       }
     }.bind(this));
   }
@@ -256,6 +249,16 @@ ol_control_Profil.prototype.info = {
 */
 ol_control_Profil.prototype.popup = function(info) {
   this.popup_.innerHTML = info;
+};
+
+/** Provides an unused geometry id
+ * @return { integer } current point
+ * @private
+ */
+ol_control_Profil.prototype._newGeometryId = function() {
+    var id = 0;
+    while (this._geometry.hasOwnProperty(id)) id += 1;
+    return id;
 };
 
 /** Show point on profil
@@ -289,35 +292,41 @@ ol_control_Profil.prototype._drawAt = function(p, dx) {
  * @return { ol.coordinates } current point
  */
 ol_control_Profil.prototype.showAt = function(where) {
-  var i, p, p0, d0 = Infinity;
+  var points = {};
   if (typeof(where) === 'undefined') {
     if (this.bar_.parentElement.classList.contains("over")) {
       // Remove it
       this._drawAt();
     }
-  } else if (where.length) {
-    // Look for closest the point
-    for (i=1; p=this.tab_[i]; i++) {
-      var d = ol_coordinate_dist2d(p[3], where);
-      if (d<d0) {
-        p0 = p;
-        d0 = d;
-      } 
-    }
   } else {
-    for (i=0; p=this.tab_[i]; i++) {
-      p0 = p;
-      if (p[0] >= where) {
-        break;
-      } 
+    for (var geomId in this._geometry) {
+        var points = {};
+        var i, p, p0, d0 = Infinity;
+        if (where.length) {
+            // Look for closest the point
+            for (i=1; p=this.tab_[geomId][i]; i++) {
+              var d = ol_coordinate_dist2d(p[3], where);
+              if (d<d0) {
+                p0 = p;
+                d0 = d;
+              } 
+            }
+          } else {
+            for (i=0; p=this.tab_[geomId][i]; i++) {
+              p0 = p;
+              if (p[0] >= where) {
+                break;
+              } 
+            }
+          }
+          if (p0) {
+            var dx = (p0[0] * this.scale_[0] + this.margin_.left) / this.ratio;
+            this._drawAt(p0, dx);
+            points[geomId] = p0[3];
+          }
     }
   }
-  if (p0) {
-    var dx = (p0[0] * this.scale_[0] + this.margin_.left) / this.ratio;
-    this._drawAt(p0, dx);
-    return p0[3];
-  }
-  return null;
+  return points;
 };
 
 /** Show point at a time on the profil
@@ -326,11 +335,11 @@ ol_control_Profil.prototype.showAt = function(where) {
  * @return { ol.coordinates } current point
  */
 ol_control_Profil.prototype.showAtTime = function(time, delta) {
-  var i, p, p0;
+  var points = {};
   if (time instanceof Date) {
     time = time.getTime()/1000;
   } else if (delta) {
-    time += this.tab_[0][3][3];
+    time += this.tab_[geomId][0][3][3];
   }
   if (typeof(time) === 'undefined') {
     if (this.bar_.parentElement.classList.contains("over")) {
@@ -338,19 +347,22 @@ ol_control_Profil.prototype.showAtTime = function(time, delta) {
       this._drawAt();
     }
   } else {
-    for (i=0; p=this.tab_[i]; i++) {
-      p0 = p;
-      if (p[3][3] >= time) {
-        break;
-      } 
+    for (var geomId in this._geometry) {
+        var i, p, p0;
+        for (i=0; p=this.tab_[geomId][i]; i++) {
+          p0 = p;
+          if (p[3][3] >= time) {
+            break;
+          } 
+        }
+        if (p0) {
+          var dx = (p0[0] * this.scale_[0] + this.margin_.left) / this.ratio;
+          this._drawAt(p0, dx);
+          points[geomId] = p0[3];
+        }
     }
   }
-  if (p0) {
-    var dx = (p0[0] * this.scale_[0] + this.margin_.left) / this.ratio;
-    this._drawAt(p0, dx);
-    return p0[3];
-  }
-  return null;
+  return points;
 };
 
 /** Get the point at a given time on the profil
@@ -358,106 +370,118 @@ ol_control_Profil.prototype.showAtTime = function(time, delta) {
  * @return { ol.coordinates } current point
  */
 ol_control_Profil.prototype.pointAtTime = function(time) {
-  var i, p;
-  // Look for closest the point
-  for (i=1; p=this.tab_[i]; i++) {
-    var t = p[3][3];
-    if (t >= time) {
-      // Previous one ?
-      var pt = this.tab_[i-1][3];
-      if ((pt[3]+t)/2 < time) return pt;
-      else return p;
-    }
+  points = {};
+  for (var geomId in this._geometry) {
+      var i, p, p0 = null;
+      var tab = this.tab_[geomId];
+      // Look for closest the point
+      for (i=1; p=tab[i]; i++) {
+        var t = p[3][3];
+        if (t >= time) {
+          // Previous one ?
+          var pt = tab[i-1][3];
+          if ((pt[3]+t)/2 < time) { p0 = pt; break; }
+          else {p0 = p; break; }
+        }
+      }
+      if (p0 == null) p0 = tab[tab.length-1][3];
+      points[geomId] = p0;
   }
-  return this.tab_[this.tab_.length-1][3];
+  return points;
 };
 
 /** Mouse move over canvas
  */
 ol_control_Profil.prototype.onMove = function(e) {
-  if (!this.tab_.length) return;
-  var box_canvas = this.canvas_.getBoundingClientRect();
-  var pos = {
-    top: box_canvas.top + window.pageYOffset - document.documentElement.clientTop,
-    left: box_canvas.left + window.pageXOffset - document.documentElement.clientLeft
-  };
-
-  var pageX = e.pageX 
-    || (e.touches && e.touches.length && e.touches[0].pageX) 
-    || (e.changedTouches && e.changedTouches.length && e.changedTouches[0].pageX);
-  var pageY = e.pageY 
-    || (e.touches && e.touches.length && e.touches[0].pageY) 
-    || (e.changedTouches && e.changedTouches.length && e.changedTouches[0].pageY);
-
-  var dx = pageX -pos.left;
-  var dy = pageY -pos.top;
-  var ratio = this.ratio;
-  if (dx>this.margin_.left/ratio && dx<(this.canvas_.width-this.margin_.right)/ratio
-    && dy>this.margin_.top/ratio && dy<(this.canvas_.height-this.margin_.bottom)/ratio) {
-    var d = (dx*ratio-this.margin_.left)/this.scale_[0];
-    var p0 = this.tab_[0];
-    var index, p;
-    for (index=1; p=this.tab_[index]; index++) {
-      if (p[0]>=d) {
-        if (d < (p[0]+p0[0])/2) {
-          index = 0;
-          p = p0;
-        }
-        break;
-      }
-    }
-    this._drawAt(p, dx);
-    this.dispatchEvent({ type:'over', click:e.type==='click', index: index, coord: p[3], time: p[2], distance: p[0] });
-    // Handle drag / click
-    switch (e.type) {
-      case 'pointerdown': {
-        this._dragging = {
-          event: { type:'dragstart', index: index, coord: p[3], time: p[2], distance: p[0] },
-          pageX: pageX,
-          pageY: pageY
-        }
-        break;
-      }
-      case 'pointerup': {
-        if (this._dragging && this._dragging.pageX) {
-          if (Math.abs(this._dragging.pageX - pageX)<3 && Math.abs(this._dragging.pageY - pageY) < 3) {
-            this.dispatchEvent({ type:'click', index: index, coord: p[3], time: p[2], distance: p[0] });
-            this.refresh();
-          }
-        } else {
-          this.dispatchEvent({ type:'dragend', index: index, coord: p[3], time: p[2], distance: p[0] });
-        }
-        this._dragging = false;
-        break;
-      }
-      default: {
-        if (this._dragging) {
-          if (this._dragging.pageX) {
-            if (Math.abs(this._dragging.pageX - pageX)>3 || Math.abs(this._dragging.pageY - pageY) > 3) {
-              this._dragging.pageX = this._dragging.pageY = false;
-              this.dispatchEvent(this._dragging.event);
+    if (Object.keys(this._geometry).length == 0) return;
+    var box_canvas = this.canvas_.getBoundingClientRect();
+    var pos = {
+      top: box_canvas.top + window.pageYOffset - document.documentElement.clientTop,
+      left: box_canvas.left + window.pageXOffset - document.documentElement.clientLeft
+    };
+      
+    var pageX = e.pageX 
+      || (e.touches && e.touches.length && e.touches[0].pageX) 
+      || (e.changedTouches && e.changedTouches.length && e.changedTouches[0].pageX);
+    var pageY = e.pageY 
+      || (e.touches && e.touches.length && e.touches[0].pageY) 
+      || (e.changedTouches && e.changedTouches.length && e.changedTouches[0].pageY);
+      
+    var dx = pageX -pos.left;
+    var dy = pageY -pos.top;
+    var ratio = this.ratio;
+    
+    if (dx>this.margin_.left/ratio && dx<(this.canvas_.width-this.margin_.right)/ratio
+      && dy>this.margin_.top/ratio && dy<(this.canvas_.height-this.margin_.bottom)/ratio) {
+      var d = (dx*ratio-this.margin_.left)/this.scale_[0];
+      for (var geomId in this._geometry) {
+        var tab = this.tab_[geomId];
+        if (!tab.length) continue;
+        
+        var p0 = tab[0];
+        var index, p;
+        for (index=1; p=tab[index]; index++) {
+          if (p[0]>=d) {
+            if (d < (p[0]+p0[0])/2) {
+              index = 0;
+              p = p0;
             }
-          } else {
-            this.dispatchEvent({ type:'dragging', index: index, coord: p[3], time: p[2], distance: p[0] });
-            var min = Math.min(this._dragging.event.index, index);
-            var max = Math.max(this._dragging.event.index, index);
-            this.refresh();
-            if (this.get('selectable')) this._drawGraph(this.tab_.slice(min, max), this._selectStyle);
+            break;
           }
         }
-        break;
+        this._drawAt(p, dx);
+        this.dispatchEvent({ type:'over', click:e.type==='click', index: index, coord: p[3], time: p[2], distance: p[0] });
+        // Handle drag / click
+        switch (e.type) {
+          case 'pointerdown': {
+            this._dragging = {
+              event: { type:'dragstart', index: index, coord: p[3], time: p[2], distance: p[0] },
+              pageX: pageX,
+              pageY: pageY
+            }
+            break;
+          }
+          case 'pointerup': {
+            if (this._dragging && this._dragging.pageX) {
+              if (Math.abs(this._dragging.pageX - pageX)<3 && Math.abs(this._dragging.pageY - pageY) < 3) {
+                this.dispatchEvent({ type:'click', index: index, coord: p[3], time: p[2], distance: p[0] });
+                this.refresh();
+              }
+            } else {
+              this.dispatchEvent({ type:'dragend', index: index, coord: p[3], time: p[2], distance: p[0] });
+            }
+            this._dragging = false;
+            break;
+          }
+          default: {
+            if (this._dragging) {
+              if (this._dragging.pageX) {
+                if (Math.abs(this._dragging.pageX - pageX)>3 || Math.abs(this._dragging.pageY - pageY) > 3) {
+                  this._dragging.pageX = this._dragging.pageY = false;
+                  this.dispatchEvent(this._dragging.event);
+                }
+              } else {
+                this.dispatchEvent({ type:'dragging', index: index, coord: p[3], time: p[2], distance: p[0] });
+                var min = Math.min(this._dragging.event.index, index);
+                var max = Math.max(this._dragging.event.index, index);
+                this.refresh();
+                if (this.get('selectable')) this._drawGraph(tab.slice(min, max), this._selectStyle);
+              }
+            }
+            break;
+          }
+        }
       }
+    } else {
+        if (this.bar_.parentElement.classList.contains('over')) {
+          this._drawAt();
+          this.dispatchEvent({ type:'out' });
+        }
+        if (e.type === 'pointerup' && this._dragging) {
+          this.dispatchEvent({ type:'dragcancel' });
+          this._dragging = false;
+        }
     }
-  } else {
-    if (this.bar_.parentElement.classList.contains('over')) {
-      this._drawAt();
-      this.dispatchEvent({ type:'out' });
-    }
-    if (e.type === 'pointerup' && this._dragging) {
-      this.dispatchEvent({ type:'dragcancel' });
-      this._dragging = false;
-    }
-  }
 };
 
 /** Show panel
@@ -494,14 +518,15 @@ ol_control_Profil.prototype.isShown = function() {
 /** Get selection
  * @param {number} starting point
  * @param {number} ending point
+ * @param {integer} geometry id
  * @return {Array<ol.coordinate>}
  */
-ol_control_Profil.prototype.getSelection = function(start, end) {
+ol_control_Profil.prototype.getSelection = function(start, end, geomId=0) {
   var sel = [];
   var min = Math.max(Math.min(start, end), 0);
-  var max = Math.min(Math.max(start, end), this.tab_.length-1);
+  var max = Math.min(Math.max(start, end), this.tab_[geomId].length-1);
   for (var i=min; i <= max; i++) {
-    sel.push(this.tab_[i][3])
+    sel.push(this.tab_[geomId][i][3])
   }
   return sel;
 };
@@ -543,6 +568,7 @@ ol_control_Profil.prototype._drawGraph = function(t, style) {
 /**
  * Set the geometry to draw the profil.
  * @param {ol.Feature|ol.geom.Geometry} f the feature.
+ * @param {integer} the provided geometry replaces the existing one of provided id if it exists. If null, a new unused id is created
  * @param {Object=} options
  *  @param {ol.ProjectionLike} options.projection feature projection, default projection of the map
  *  @param {string} options.zunit 'm' or 'km', default m
@@ -553,12 +579,29 @@ ol_control_Profil.prototype._drawGraph = function(t, style) {
  *  @param {integer|undefined} options.zMaxChars maximum number of chars to be used for z graduation before switching to scientific notation
  *  @param {Number|undefined} options.graduation z graduation default 100
  *  @param {integer|undefined} options.amplitude amplitude of the altitude, default zmax-zmin
+ *  @param {ol.style.Style} [options.style] style to draw the profil, default darkblue
+ *  @return {integer} geometry id
  * @api stable
  */
-ol_control_Profil.prototype.setGeometry = function(g, options) {
+ol_control_Profil.prototype.setGeometry = function(g, options, replaceId=0) {
+  if (replaceId == null) replaceId = this._newGeometryId();
   if (!options) options = {};
   if (g instanceof ol_Feature) g = g.getGeometry();
-  this._geometry = [g, options];
+  this._geometry[replaceId] = [g, options];
+  
+  // Drawing style
+  if (options.style instanceof ol_style_Style) {
+    this._style[replaceId] = options.style;
+  } else {
+    this._style[replaceId] = new ol_style_Style({
+      text: new ol_style_Text(),
+      stroke: new ol_style_Stroke({
+        width: 1.5,
+        color: '#369'
+      })
+    });
+  }
+  if (!this._style[replaceId].getText()) this._style[replaceId].setText(new ol_style_Text());
 
   // No Z
   if (!/Z/.test(g.getLayout())) return;
@@ -593,7 +636,8 @@ ol_control_Profil.prototype.setGeometry = function(g, options) {
 
   // Calculate [distance, altitude, time, point] for each points
   var zmin=Infinity, zmax=-Infinity;
-  var i, p, d, z, ti, t = this.tab_ = [];
+  this.tab_[replaceId] = [];
+  var i, p, d, z, ti, t = this.tab_[replaceId];
   for (i=0, p; p=c[i]; i++) {
     z = p[2];
     if (z<zmin) zmin=z;
@@ -604,7 +648,9 @@ ol_control_Profil.prototype.setGeometry = function(g, options) {
     t.push ([d, z, ti, p]);
   }
 
-  this._z = [zmin,zmax];
+  this._z[replaceId] = [zmin,zmax];
+  
+  
 
   this.set('graduation', options.graduation || 100);
   this.set('zmin', options.zmin);
@@ -616,157 +662,161 @@ ol_control_Profil.prototype.setGeometry = function(g, options) {
   this.set('zMaxChars', options.zMaxChars);
 
   this.dispatchEvent({ type: 'change:geometry', geometry: g })
-  
   this.refresh();
+  
+  return replaceId;
 };
 
 /** Refresh the profil
  */
 ol_control_Profil.prototype.refresh = function() {
-  var canvas = this.canvas_;
-  var ctx = canvas.getContext('2d');
-  var w = canvas.width;
-  var h = canvas.height;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0,0, w, h);
-
-  var zmin = this._z[0];
-  var zmax = this._z[1];
-  var t = this.tab_;
-
-  var d = t[t.length-1][0];
-  var ti = t[t.length-1][2];
-  var i;
-
-  if (!d) {
-    console.error('[ol/control/Profil] no data...', t);
-    return;
-  }
-
-  // Margin
-  ctx.setTransform(1, 0, 0, 1, this.margin_.left, h-this.margin_.bottom);
-  var ratio = this.ratio;
-
-  w -= this.margin_.right + this.margin_.left;
-  h -= this.margin_.top + this.margin_.bottom;
-  // Draw axes
-  ctx.strokeStyle = this._style.getText().getFill().getColor() || '#000';
-  ctx.lineWidth = 0.5*ratio;
-  ctx.beginPath();
-  ctx.moveTo(0,0); ctx.lineTo(0,-h);
-  ctx.moveTo(0,0); ctx.lineTo(w, 0);
-  ctx.stroke();
-
-  // Info
-  this.element.querySelector(".track-info .zmin").textContent = zmin.toFixed(2)+this.info.altitudeUnits;
-  this.element.querySelector(".track-info .zmax").textContent = zmax.toFixed(2)+this.info.altitudeUnits;
-  if (d>1000) {
-    this.element.querySelector(".track-info .dist").textContent = (d/1000).toFixed(1)+this.info.distanceUnitsKM;
-  } else {
-    this.element.querySelector(".track-info .dist").textContent= (d).toFixed(1)+this.info.distanceUnitsM;
-  }
-  this.element.querySelector(".track-info .time").textContent = ti;
-
-  // Set graduation
-  var grad = this.get('graduation');
-  while (true) {
-    zmax = Math.ceil(zmax/grad)*grad;
-    zmin = Math.floor(zmin/grad)*grad;
-    var nbgrad = (zmax-zmin)/grad;
-    if (h/nbgrad < 15*ratio) {
-      grad *= 2;
+    var canvas = this.canvas_;
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width;
+    var h = canvas.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0,0, w, h);
+    console.trace();
+    // Margin
+    ctx.setTransform(1, 0, 0, 1, this.margin_.left, h-this.margin_.bottom);
+    var ratio = this.ratio;
+    w -= this.margin_.right + this.margin_.left;
+    h -= this.margin_.top + this.margin_.bottom;
+    
+    // Draw axes
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 0.5*ratio;
+    ctx.beginPath();
+    ctx.moveTo(0,0); ctx.lineTo(0,-h);
+    ctx.moveTo(0,0); ctx.lineTo(w, 0);
+    ctx.stroke();
+        
+    var dmax = 0;
+    var zmin = Number.MAX_VALUE;
+    var zmax = -Number.MAX_VALUE;
+    var ti;
+    for (var geomId in this._geometry) {
+        var t = this.tab_[geomId];
+        var d = t[t.length-1][0];
+        if (!d) {
+          continue;
+        } 
+        dmax = Math.max(d,dmax);
+        zmin = Math.min(zmin, this._z[geomId][0]);
+        zmax = Math.max(zmax, this._z[geomId][1]);
+        
+        ti = t[t.length-1][2]; //We use the time from latest geometry, considering they are the same
     }
-    else break;
-  }
-
-  // Set amplitude
-  if (typeof(this.get('zmin'))=='number' && zmin > this.get('zmin')) zmin = this.get('zmin');
-  if (typeof(this.get('zmax'))=='number' && zmax < this.get('zmax')) zmax = this.get('zmax');
-  var amplitude = this.get('amplitude');
-  if (amplitude) {
-    zmax = Math.max (zmin + amplitude, zmax);
-  }
-
-  // Scales lines
-  var scx = w/d;
-  var scy = -h/(zmax-zmin);
-  var dy = this.dy_ = -zmin*scy;
-  this.scale_ = [scx,scy];
-
-  this._drawGraph(t, this._style);
-
-  // Draw 
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = this._style.getText().getFill().getColor() || '#000';
-  // Scale Z
-  ctx.beginPath();
-  var fix = this.get('zDigits') || 0;
-  var exp = null;
-  if (typeof(this.get('zMaxChars'))=='number') {
-    var usedChars;
-    if (this.get('zunit') != 'km') usedChars = Math.max(zmin.toFixed(fix).length, zmax.toFixed(fix).length);
-    else usedChars = Math.max((zmin/1000).toFixed(1).length, (zmax/1000).toFixed(1).length);
-    if (this.get('zMaxChars') < usedChars) {
-      var exp = Math.floor(Math.log10(Math.max(Math.abs(zmin), Math.abs(zmax),Number.MIN_VALUE)));
-      ctx.font = 'bold '+(9*ratio)+'px arial';
-      ctx.fillText(exp.toString(), -8*ratio, 8*ratio);
-      var expMetrics = ctx.measureText(exp.toString());
-      var expWidth = expMetrics.width;
-      var expHeight = expMetrics.actualBoundingBoxAscent + expMetrics.actualBoundingBoxDescent;
-      ctx.font = 'bold '+(12*ratio)+'px arial';
-      ctx.fillText("10", -8*ratio-expWidth, 8*ratio+0.5*expHeight);
-    }
-  }
-  ctx.font = (10*ratio)+'px arial';
-  ctx.textBaseline = 'middle';
-  for (i=zmin; i<=zmax; i+=grad) {
-    if (exp !== null) {
-        let baseNumber = i / (10**exp);
-        if (this.get('zunit') == 'km')
-            baseNumber /= 1000;
-        let nbDigits = this.get('zMaxChars') - Math.floor(Math.log10(Math.max(Math.abs(baseNumber),1))+1) - 1;
-        if (baseNumber < 0) nbDigits -= 1
-        if (this.get('zunit') != 'km') ctx.fillText(baseNumber.toFixed(Math.max(nbDigits, 0)), -4*ratio, i*scy+dy);
-        else ctx.fillText(baseNumber.toFixed(Math.max(nbDigits,0)), -4*ratio, i*scy+dy);
+    
+    // Info
+    this.element.querySelector(".track-info .zmin").textContent = zmin.toFixed(2)+this.info.altitudeUnits;
+    this.element.querySelector(".track-info .zmax").textContent = zmax.toFixed(2)+this.info.altitudeUnits;
+    if (dmax>1000) {
+      this.element.querySelector(".track-info .dist").textContent = (dmax/1000).toFixed(1)+this.info.distanceUnitsKM;
     } else {
-        if (this.get('zunit') != 'km') ctx.fillText(i.toFixed(fix), -4*ratio, i*scy+dy);
-        else ctx.fillText((i/1000).toFixed(1), -4*ratio, i*scy+dy);
+      this.element.querySelector(".track-info .dist").textContent= (dmax).toFixed(1)+this.info.distanceUnitsM;
     }
-    ctx.moveTo (-2*ratio, i*scy+dy);
-    if (i!=0) ctx.lineTo (d*scx, i*scy+dy);
-    else ctx.lineTo (0, i*scy+dy);
-  }
-  // Scale X
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.setLineDash([ratio,3*ratio]);
-  var unit = this.get('unit') ||"km";
-  var step;
-  if (d>1000) {
-    step = Math.round(d/1000)*100;
-    if (step > 1000) step = Math.ceil(step/1000)*1000;
-  } else {
-    unit = "m";
-    if (d>100) step = Math.round(d/100)*10;
-    else if (d>10) step = Math.round(d/10);
-    else if (d>1) step = Math.round(d)/10;
-    else step = d;
-  }
-  for (i=0; i<=d; i+=step) {
-    var txt = (unit=="m") ? i : (i/1000);
-    //if (i+step>d) txt += " "+ (options.zunits || "km");
-    ctx.fillText(Math.round(txt*10)/10, i*scx, 4*ratio);
-    ctx.moveTo (i*scx, 2*ratio); ctx.lineTo (i*scx, 0);
-  }
-  ctx.font = (12*ratio)+"px arial";
-  ctx.fillText(this.info.xtitle.replace("(km)","("+unit+")"), w/2, 18*ratio);
-  ctx.save();
-  ctx.rotate(-Math.PI/2);
-  ctx.fillText(this.info.ytitle, h/2, -this.margin_.left);
-  ctx.restore();
+    this.element.querySelector(".track-info .time").textContent = ti;
   
-  ctx.stroke();
+    // Set graduation
+    var grad = this.get('graduation');
+    while (true) {
+      zmax = Math.ceil(zmax/grad)*grad;
+      zmin = Math.floor(zmin/grad)*grad;
+      var nbgrad = (zmax-zmin)/grad;
+      if (h/nbgrad < 15*ratio) {
+        grad *= 2;
+      }
+      else break;
+    }
+    // Set amplitude
+    if (typeof(this.get('zmin'))=='number' && zmin > this.get('zmin')) zmin = this.get('zmin');
+    if (typeof(this.get('zmax'))=='number' && zmax < this.get('zmax')) zmax = this.get('zmax');
+    var amplitude = this.get('amplitude');
+    if (amplitude) {
+      zmax = Math.max (zmin + amplitude, zmax);
+    }
+    // Scales lines
+    var scx = w/dmax;
+    var scy = -h/(zmax-zmin);
+    var dy = this.dy_ = -zmin*scy;
+    this.scale_ = [scx,scy];
+    
+    // Draw 
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#000';
+    // Scale Z
+    ctx.beginPath();
+    var fix = this.get('zDigits') || 0;
+    var exp = null;
+    if (typeof(this.get('zMaxChars'))=='number') {
+      var usedChars;
+      if (this.get('zunit') != 'km') usedChars = Math.max(zmin.toFixed(fix).length, zmax.toFixed(fix).length);
+      else usedChars = Math.max((zmin/1000).toFixed(1).length, (zmax/1000).toFixed(1).length);
+      if (this.get('zMaxChars') < usedChars) {
+        var exp = Math.floor(Math.log10(Math.max(Math.abs(zmin), Math.abs(zmax),Number.MIN_VALUE)));
+        ctx.font = 'bold '+(9*ratio)+'px arial';
+        ctx.fillText(exp.toString(), -8*ratio, 8*ratio);
+        var expMetrics = ctx.measureText(exp.toString());
+        var expWidth = expMetrics.width;
+        var expHeight = expMetrics.actualBoundingBoxAscent + expMetrics.actualBoundingBoxDescent;
+        ctx.font = 'bold '+(12*ratio)+'px arial';
+        ctx.fillText("10", -8*ratio-expWidth, 8*ratio+0.5*expHeight);
+      }
+    }
+    ctx.font = (10*ratio)+'px arial';
+    ctx.textBaseline = 'middle';
+    var i;
+    for (i=zmin; i<=zmax; i+=grad) {
+      if (exp !== null) {
+          let baseNumber = i / (10**exp);
+          if (this.get('zunit') == 'km')
+              baseNumber /= 1000;
+          let nbDigits = this.get('zMaxChars') - Math.floor(Math.log10(Math.max(Math.abs(baseNumber),1))+1) - 1;
+          if (baseNumber < 0) nbDigits -= 1
+          if (this.get('zunit') != 'km') ctx.fillText(baseNumber.toFixed(Math.max(nbDigits, 0)), -4*ratio, i*scy+dy);
+          else ctx.fillText(baseNumber.toFixed(Math.max(nbDigits,0)), -4*ratio, i*scy+dy);
+      } else {
+          if (this.get('zunit') != 'km') ctx.fillText(i.toFixed(fix), -4*ratio, i*scy+dy);
+          else ctx.fillText((i/1000).toFixed(1), -4*ratio, i*scy+dy);
+      }
+      ctx.moveTo (-2*ratio, i*scy+dy);
+      if (i!=0) ctx.lineTo (dmax*scx, i*scy+dy);
+      else ctx.lineTo (0, i*scy+dy);
+    }
+    // Scale X
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.setLineDash([ratio,3*ratio]);
+    var unit = this.get('unit') ||"km";
+    var step;
+    if (dmax>1000) {
+      step = Math.round(dmax/1000)*100;
+      if (step > 1000) step = Math.ceil(step/1000)*1000;
+    } else {
+      unit = "m";
+      if (dmax>100) step = Math.round(dmax/100)*10;
+      else if (dmax>10) step = Math.round(dmax/10);
+      else if (dmax>1) step = Math.round(dmax)/10;
+      else step = dmax;
+    }
+    for (i=0; i<=dmax; i+=step) {
+      var txt = (unit=="m") ? i : (i/1000);
+      ctx.fillText(Math.round(txt*10)/10, i*scx, 4*ratio);
+      ctx.moveTo (i*scx, 2*ratio); ctx.lineTo (i*scx, 0);
+    }
+    ctx.font = (12*ratio)+"px arial";
+    ctx.fillText(this.info.xtitle.replace("(km)","("+unit+")"), w/2, 18*ratio);
+    ctx.save();
+    ctx.rotate(-Math.PI/2);
+    ctx.fillText(this.info.ytitle, h/2, -this.margin_.left);
+    ctx.restore();
+    ctx.stroke(); 
+            
+    for (var geomId in this._geometry) {    
+        this._drawGraph(this.tab_[geomId], this._style[geomId]); 
+    }
 };
 
 /** Get profil image
