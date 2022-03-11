@@ -45,6 +45,9 @@ import ol_ext_element from '../util/element'
  *  @param {boolean} options.zoomable can zoom in the profil
  */
 var ol_control_Profil = function(options) {
+
+  this.eventKeys = [];
+
   options = options || {};
   this.info = options.info || ol_control_Profil.prototype.info;
   var self = this;
@@ -116,15 +119,18 @@ var ol_control_Profil = function(options) {
     }
   });
 
-  var div_to_canvas = document.createElement("div");
-  div.appendChild(div_to_canvas);
-  div_to_canvas.style.width = this.canvas_.width/ratio + "px";
-  div_to_canvas.style.height = this.canvas_.height/ratio + "px";
-  div_to_canvas.appendChild(this.canvas_);
-  div_to_canvas.addEventListener('pointerdown', this.onMove.bind(this));
-  document.addEventListener('pointerup', this.onMove.bind(this));
-  div_to_canvas.addEventListener('mousemove', this.onMove.bind(this));
-  div_to_canvas.addEventListener('touchmove', this.onMove.bind(this));
+  this.div_to_canvas = document.createElement("div");
+  div.appendChild(this.div_to_canvas);
+  this.div_to_canvas.style.width = this.canvas_.width/ratio + "px";
+  this.div_to_canvas.style.height = this.canvas_.height/ratio + "px";
+  this.div_to_canvas.appendChild(this.canvas_);
+  
+  this.onMoveFunction =  this.onMove.bind(this);
+  
+  this.div_to_canvas.addEventListener('pointerdown', this.onMoveFunction);
+  document.addEventListener('pointerup', this.onMoveFunction);
+  this.div_to_canvas.addEventListener('mousemove', this.onMoveFunction);
+  this.div_to_canvas.addEventListener('touchmove', this.onMoveFunction);
 
   ol_control_Control.call(this, {
     element: element,
@@ -200,13 +206,13 @@ var ol_control_Profil = function(options) {
   if (options.zoomable) {
     this.set('selectable', true);
     var start, geom;
-    this.on('change:geometry', function() {
+    this.eventKeys.push(this.on('change:geometry', function() {
       geom = null;
-    });
-    this.on('dragstart', function(e) {
+    }));
+    this.eventKeys.push(this.on('dragstart', function(e) {
       start = e.index;
-    })
-    this.on('dragend', function(e) {
+    }))
+    this.eventKeys.push(this.on('dragend', function(e) {
       if (Math.abs(start - e.index) > 10) {
         if (!geom) {
           var bt = ol_ext_element.create('BUTTON', {
@@ -229,7 +235,7 @@ var ol_control_Profil = function(options) {
         geom = saved;
         this.dispatchEvent({ type:'zoom', geometry: g, start: start, end: e.index });
       }
-    }.bind(this));
+    }.bind(this)));
   }
 };
 ol_ext_inherits(ol_control_Profil, ol_control_Control);
@@ -352,6 +358,22 @@ ol_control_Profil.prototype.showAtTime = function(time, delta) {
   }
   return null;
 };
+
+
+/**
+ * Unregister all listeners associated with the profile.
+ * @api stable
+ */
+ol_control_Profil.prototype.unregisterAllListeners = function() {
+     while (this.eventKeys.length > 0){
+        ol.Observable.unByKey(this.eventKeys.pop());
+    }
+    document.removeEventListener('pointerup', this.onMoveFunction);
+    this.div_to_canvas.removeEventListener('pointerdown', this.onMoveFunction);
+    this.div_to_canvas.removeEventListener('mousemove', this.onMoveFunction);
+    this.div_to_canvas.removeEventListener('touchmove', this.onMoveFunction);
+};
+
 
 /** Get the point at a given time on the profil
  * @param { number } time time at which to show the point
